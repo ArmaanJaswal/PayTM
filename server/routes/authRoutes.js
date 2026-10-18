@@ -1,25 +1,31 @@
 import express from 'express'
-import client from '../utils/db';
+import connection from '../utils/db.js';
 import bcrypt from 'bcrypt'
-import { message } from 'statuses';
 import jwt from 'jsonwebtoken'
 
 const router = express.Router();
 
 
-router.use("/signup",async (req,res)=>{
+router.post("/signup",async (req,res)=>{
     try{
         const {username,email,password} = req.body;
 
     if(!username || !email || !password){
         return res.status(400).json({message:"Bad Request"})
     }
-    const hashedPassword = bcrypt.hash(password,10);
-    const response = await client.query(`INSERT INTO users(username,email,password) $1,$2,$3 RETURNING user_id, username, email`,[username,email,hashedPassword]);;
+    const hashedPassword =await bcrypt.hash(password,10);
+    const response = await connection.query(`INSERT INTO users(username,email,password) VALUES ($1,$2,$3) RETURNING id, username, email`,[username,email,hashedPassword]);;
 
     console.log(response.rows[0]);
+    const user = response.rows[0];
+    await connection.query(
+  `INSERT INTO money (id, balance)
+   VALUES ($1, $2)`,
+  [user.id, 0]
+);
+    
 
-    return res.status(201).json({message:"User Created Successfully",response})
+    return res.status(201).json({message:"User Created Successfully",user:response.rows[0]})
     }catch(err){
         console.log("Error while Signing up",err);
         return res.status(400).json({message:"Error while signin up"});
@@ -27,14 +33,14 @@ router.use("/signup",async (req,res)=>{
 })
 
 
-router.use("/signin",async (req,res)=>{
+router.post("/signin",async (req,res)=>{
     try{
         const {email,password}= req.body;
         if(!email || !password){
         return res.status(400).json({message:"Bad Request"});
         }
 
-        const findUser = await client.query(`SELECT * FROM USERS WHERE email = $1`,[email]);
+        const findUser = await connection.query(`SELECT * FROM USERS WHERE email = $1`,[email]);
 
         if(findUser.rows.length>0){
             const foundUser = findUser.rows[0];
@@ -65,3 +71,4 @@ router.use("/signin",async (req,res)=>{
 })
 
 
+export default router;

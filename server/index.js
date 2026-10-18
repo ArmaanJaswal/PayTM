@@ -1,17 +1,27 @@
-import dotenv from 'dotenv'
+import "dotenv/config"
 import express from 'express'
-import { connectDb } from './utils/db';
+import { connectDb } from './utils/db.js';
+import authRoutes from './routes/authRoutes.js'
+import moneyRoutes from './routes/moneyRoutes.js'
+import userRoutes from './routes/userRoutes.js'
+import cookieParser from "cookie-parser";
 
 
-dotenv.config();
 
 const app = express();
+app.use(express.json());
+app.use(cookieParser());
 
 const startServer =async ()=>{
     try{
         await connectDb();
 
-        app.listen(process.abort.env.PORT,()=>{
+        app.use('/api/v1/auth',authRoutes);
+        app.use('/api/v1/money',moneyRoutes);
+        app.use('/api/v1/user',userRoutes);
+
+        const PORT = process.env.PORT || 3000
+        app.listen(PORT,()=>{
             console.log(`Server is running on port ${PORT}`)
         })
     }catch(err){
@@ -26,4 +36,3 @@ startServer();
 
 
 
-app.listen(3000)

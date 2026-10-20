@@ -2,9 +2,22 @@ import express from 'express'
 import connection from '../utils/db.js';
 import bcrypt from 'bcrypt'
 import jwt from 'jsonwebtoken'
+import { authMiddleware } from '../middlewares/authMiddleware.js';
 
 const router = express.Router();
 
+router.get("/me", authMiddleware, async (req, res) => {
+  try {
+    res.status(200).json({
+      authenticated: true,
+      user: req.user,
+    });
+  } catch (error) {
+    res.status(500).json({
+      message: "Failed to verify authentication",
+    });
+  }
+});
 
 router.post("/signup",async (req,res)=>{
     try{
@@ -65,10 +78,24 @@ router.post("/signin",async (req,res)=>{
         }
     }catch(err){
         console.log("Error while signing in ",err);
-        return res.status(400).json({message:"Bad Request"})
+        return res.status(400).json({message:"Bad Request"});
     }
-    
-})
+});
 
+router.post("/logout", (req, res) => {
+    res.clearCookie("token", {
+        httpOnly: true,
+        sameSite: "lax",
+    });
+    return res.status(200).json({ message: "Logged out successfully" });
+});
+
+router.get("/logout", (req, res) => {
+    res.clearCookie("token", {
+        httpOnly: true,
+        sameSite: "lax",
+    });
+    return res.status(200).json({ message: "Logged out successfully" });
+});
 
 export default router;

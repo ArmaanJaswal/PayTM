@@ -5,24 +5,32 @@ import { authMiddleware } from '../middlewares/authMiddleware.js';
 
 const router = express.Router();
 
-router.get("/",authMiddleware,async (req,res)=>{
-    try{
-        const data = await connection.query(`
-            SELECT * FROM users
-            INNER JOIN money
-            ON users.id = money.id
-            `)
+router.get("/", authMiddleware, async (req, res) => {
+  try {
+    const data = await connection.query(`
+      SELECT id, username, email
+      FROM users
+      ORDER BY username ASC
+    `);
 
-        if(data.rows.length===0){
-            return res.status(404).json({message:"No user found"});
-        }
-
-        return res.status(200).json({message:"Data Fetched Successfully",users:data.rows})
-    }catch(err){
-        console.log("Error whilefetching data ",err);
-        return res.status(500).json({messsage:"Internal Server Error"});
+    if (data.rows.length === 0) {
+      return res.status(404).json({
+        message: "No users found",
+      });
     }
-})
+
+    return res.status(200).json({
+      message: "Users fetched successfully",
+      users: data.rows,
+    });
+  } catch (err) {
+    console.error("Error while fetching users:", err);
+
+    return res.status(500).json({
+      message: "Internal Server Error",
+    });
+  }
+});
 
 
 router.put("/update", authMiddleware, async (req, res) => {

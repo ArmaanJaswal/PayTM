@@ -34,59 +34,145 @@ console.log("Updated balance:", data.rows[0]?.balance);
     }
 })
 
+router.get("/balance", authMiddleware, async (req, res) => {
+  try {
+    const id = req.user.id;
 
-router.post("/send",authMiddleware,async(req,res)=>{
-    try{
-        const id = req.user.id;
+    const data = await connection.query(
+      `SELECT balance FROM money WHERE id = $1`,
+      [id]
+    );
 
-        const {amount,receiver} = req.body;
-
-        if(amount==0 || amount<0){
-            return res.status(400).json({message:"Amount can't be 0 or in negative"})
-        }
-
-        if(id==receiver){
-            return res.status(400).json({message:"Cannot send money to yourself "})
-        }
-
-        await connection.query(`BEGIN`);
-
-        const data = await connection.query(`
-            SELECT balance FROM money where id = $1 FOR UPDATE`,[id]
-            );
-
-        const data2 = await connection.query(`
-            SELECT balance FROM money where id= $1 FOR UPDATE`,[receiver]
-            )
-
-        if(data.rows.length ==0 || data2.rows.length==0){
-            await connection.query("ROLLBACK");
-
-            return res.status(404).json({message:"Sender or Receiver Account not found"})
-        }
-
-        const balance = data.rows[0].balance;
-        const receiverBalance = data2.rows[0].balance;
-
-        if(amount>balance){
-            await connection.query("ROLLBACK")
-            return res.status(400).json({message:"Insufficient Balance"})
-        }
-
-        await connection.query(`UPDATE money SET balance = balance - $1 WHERE id = $2`,[amount,id]);
-        await connection.query(`UPDATE money SET balance = balance + $1 WHERE id = $2`,[amount,receiver]);
-
-        await connection.query("COMMIT");
-
-        return res.status(200).json({message:"Money transferred successfully",remainingBalance: balance-amount, receiverBalance: receiverBalance+amount});
-        
-
-    }catch(err){
-        await connection.query("ROLLBACK");
-        console.log("Transfer Error",err);
-
-        return res.status(500).json({message:"Internal Server Error"});
+    if (data.rowCount === 0) {
+      return res.status(404).json({
+        message: "Money account not found",
+      });
     }
-})
+
+    return res.status(200).json({
+      message: "Balance fetched successfully",
+      balance: data.rows[0].balance,
+    });
+  } catch (err) {
+    console.error("Error while fetching balance:", err);
+
+    return res.status(500).json({
+      message: "Internal Server Error",
+    });
+  }
+});
+
+router.post("/send/:receiver", authMiddleware, async (req, res) => {
+  const client = await connection.connect();
+  let transactionStarted = false;
+
+  try {
+    const senderId = req.user.id;
+    const receiverId = req.params.receiver;
+    const amount = Number(req.body.amount);
+
+    // Validate amount
+    if (
+      req.body.amount === undefined ||
+      req.body.amount === null ||
+      req.body.amount === "" ||
+      !Number.isFinite(amount) ||
+      amount <= 0
+    ) {
+      return res.status(400).json({
+        message: "Amount must be a valid positive number",
+      });
+    }
+
+    // Prevent self-transfer
+    if (String(senderId) === String(receiverId)) {
+      return res.status(400).json({
+        message: "Cannot send money to yourself",
+      });
+    }
+
+    await client.query("BEGIN");
+    transactionStarted = true;
+
+    // Lock both accounts in a consistent order
+    const result = await client.query(
+      `SELECT id, balance
+       FROM money
+       WHERE id IN ($1, $2)
+       ORDER BY id
+       FOR UPDATE`,
+      [senderId, receiverId]
+    );
+
+    const sender = result.rows.find(
+      (row) => String(row.id) === String(senderId)
+    );
+
+    const receiver = result.rows.find(
+      (row) => String(row.id) === String(receiverId)
+    );
+
+    if (!sender || !receiver) {
+      await client.query("ROLLBACK");
+      transactionStarted = false;
+
+      return res.status(404).json({
+        message: "Sender or receiver account not found",
+      });
+    }
+
+    if (amount > Number(sender.balance)) {
+      await client.query("ROLLBACK");
+      transactionStarted = false;
+
+      return res.status(400).json({
+        message: "Insufficient balance",
+      });
+    }
+
+    // Deduct from sender
+    const debit = await client.query(
+      `UPDATE money
+       SET balance = balance - $1
+       WHERE id = $2
+       RETURNING balance`,
+      [amount, senderId]
+    );
+
+    // Credit receiver
+    const credit = await client.query(
+      `UPDATE money
+       SET balance = balance + $1
+       WHERE id = $2
+       RETURNING balance`,
+      [amount, receiverId]
+    );
+
+    await client.query("COMMIT");
+    transactionStarted = false;
+
+    return res.status(200).json({
+      message: "Money transferred successfully",
+      remainingBalance: debit.rows[0].balance,
+      receiverBalance: credit.rows[0].balance,
+    });
+  } catch (err) {
+    if (transactionStarted) {
+      try {
+        await client.query("ROLLBACK");
+      } catch (rollbackError) {
+        console.error("Rollback Error:", rollbackError);
+      }
+    }
+
+    console.error("Transfer Error:", err);
+
+    return res.status(500).json({
+      message: "Internal Server Error",
+    });
+  } finally {
+    client.release();
+  }
+});
 
 export default router;
